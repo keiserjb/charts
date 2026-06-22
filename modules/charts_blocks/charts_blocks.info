@@ -1,0 +1,6 @@
+name = Charts Blocks
+description = Create configurable chart blocks without using Views.
+package = Charts
+backdrop = 1.x
+type = module
+dependencies[] = charts

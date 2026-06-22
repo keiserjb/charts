@@ -11,7 +11,7 @@ function charts_highcharts_charts_info() {
   $info['highcharts'] = array(
     'label' => t('Highcharts'),
     'render' => '_charts_highcharts_render',
-    'types' => array('area', 'bar', 'column', 'line', 'pie', 'scatter'),
+    'types' => array('area', 'arearange', 'bar', 'boxplot', 'bubble', 'column', 'donut', 'dumbbell', 'gauge', 'heatmap', 'line', 'pie', 'scatter', 'solidgauge', 'spline'),
     'file' => 'charts_highcharts.inc',
   );
   return $info;

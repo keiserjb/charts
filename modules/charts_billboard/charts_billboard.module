@@ -1,0 +1,60 @@
+<?php
+/**
+ * @file
+ * Charts module integration with Billboard.js.
+ */
+
+/**
+ * Implements hook_charts_info().
+ */
+function charts_billboard_charts_info() {
+  $info['billboard'] = array(
+    'label' => t('Billboard.js'),
+    'render' => '_charts_billboard_render',
+    'types' => array('area', 'arearange', 'bar', 'bubble', 'candlestick', 'column', 'donut', 'gauge', 'line', 'pie', 'scatter', 'spline'),
+    'file' => 'charts_billboard.inc',
+  );
+  return $info;
+}
+
+/**
+ * Implements hook_library_info().
+ */
+function charts_billboard_library_info() {
+  $libraries['billboard'] = array(
+    'title' => t('Billboard.js library'),
+    'version' => '3.12.0',
+    'js' => array(
+      array(
+        'data' => 'https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js',
+        'type' => 'external',
+      ),
+      array(
+        'data' => 'https://cdn.jsdelivr.net/npm/billboard.js@3.12.0/dist/billboard.pkgd.min.js',
+        'type' => 'external',
+      ),
+    ),
+    'css' => array(
+      array(
+        'data' => 'https://cdn.jsdelivr.net/npm/billboard.js@3.12.0/dist/billboard.min.css',
+        'type' => 'external',
+      ),
+    ),
+  );
+
+  $libraries['charts_billboard'] = array(
+    'title' => t('Billboard charts integration'),
+    'version' => '1.0',
+    'js' => array(
+      array(
+        'data' => backdrop_get_path('module', 'charts_billboard') . '/charts_billboard.js',
+        'type' => 'file',
+      ),
+    ),
+    'dependencies' => array(
+      array('charts_billboard', 'billboard'),
+    ),
+  );
+
+  return $libraries;
+}

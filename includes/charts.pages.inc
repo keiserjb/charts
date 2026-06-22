@@ -32,6 +32,27 @@ function charts_settings_form($form, $defaults = array(), $field_options = array
   foreach ($charts_info as $library_name => $library_info) {
     $library_options[$library_name] = $library_info['label'];
   }
+  if (empty($library_options)) {
+    $form['library_missing'] = array(
+      '#type' => 'markup',
+      '#markup' => '<div class="messages warning">' . t('No charting libraries are enabled. Enable a Charts provider module such as Charts Google, Charts Highcharts, Charts Billboard, Charts C3, or Charts Chart.js.') . '</div>',
+    );
+    return $form;
+  }
+  if (empty($options['library']) || !isset($library_options[$options['library']])) {
+    $options['library'] = key($library_options);
+  }
+
+  // Provide map of library => supported chart types to the admin JS behavior.
+  $form['#attached']['js'][] = array(
+    'type' => 'setting',
+    'data' => array(
+      'chartsAdmin' => array(
+        'libraryTypeMap' => charts_library_type_map($charts_info),
+      ),
+    ),
+  );
+
   $form['library'] = array(
     '#title' => t('Charting library'),
     '#type' => 'select',
@@ -49,6 +70,27 @@ function charts_settings_form($form, $defaults = array(), $field_options = array
   foreach ($chart_types as $chart_type => $chart_type_info) {
     $type_options[$chart_type] = $chart_type_info['label'];
   }
+
+  // If only one charting library is available, limit the type options in PHP.
+  if (count($library_options) <= 1) {
+    $supported_types = charts_library_supported_types($options['library'], $charts_info);
+    if ($supported_types) {
+      $type_options = array_intersect_key($type_options, $supported_types);
+    }
+  }
+
+  // Ensure the selected default type is valid for the selected library.
+  if (empty($options['type']) || !isset($type_options[$options['type']]) || !charts_library_supports_type($options['library'], $options['type'], $charts_info)) {
+    $supported_types = charts_library_supported_types($options['library'], $charts_info);
+    if ($supported_types) {
+      $supported_type_options = array_intersect_key($type_options, $supported_types);
+      $options['type'] = $supported_type_options ? key($supported_type_options) : key($type_options);
+    }
+    else {
+      $options['type'] = key($type_options);
+    }
+  }
+
   $form['type'] = array(
     '#title' => t('Chart type'),
     '#type' => 'radios',
@@ -62,11 +104,24 @@ function charts_settings_form($form, $defaults = array(), $field_options = array
 
   // Set data attributes to identify special properties of different types.
   foreach ($chart_types as $chart_type => $chart_type_info) {
+    if (!isset($form['type'][$chart_type])) {
+      continue;
+    }
     if ($chart_type_info['axis_inverted']) {
       $form['type'][$chart_type]['#attributes']['data-axis-inverted'] = TRUE;
     }
     if ($chart_type_info['axis'] === CHARTS_SINGLE_AXIS) {
       $form['type'][$chart_type]['#attributes']['data-axis-single'] = TRUE;
+    }
+
+    $supported_libraries = array();
+    foreach (array_keys($library_options) as $library_name) {
+      if (charts_library_supports_type($library_name, $chart_type, $charts_info)) {
+        $supported_libraries[] = $library_name;
+      }
+    }
+    if ($supported_libraries) {
+      $form['type'][$chart_type]['#attributes']['data-supported-libraries'] = implode(' ', $supported_libraries);
     }
   }
 
@@ -93,8 +148,7 @@ function charts_settings_form($form, $defaults = array(), $field_options = array
     $color_count = 0;
     foreach ($field_options as $field_name => $field_label) {
       $form['fields']['field_colors'][$field_name] = array(
-        '#type' => 'textfield',
-        '#attributes' => array('TYPE' => 'color'),
+        '#type' => 'color',
         '#size' => 10,
         '#maxlength' => 7,
         '#theme_wrappers' => array(),
@@ -116,6 +170,12 @@ function charts_settings_form($form, $defaults = array(), $field_options = array
     '#type' => 'textfield',
     '#default_value' => $options['title'],
     '#parents' => array_merge($parents, array('title')),
+  );
+  $form['display']['title_color'] = array(
+    '#title' => t('Title color'),
+    '#type' => 'color',
+    '#default_value' => $options['title_color'],
+    '#parents' => array_merge($parents, array('title_color')),
   );
   $form['display']['title_position'] = array(
     '#title' => t('Title position'),
@@ -152,6 +212,43 @@ function charts_settings_form($form, $defaults = array(), $field_options = array
     '#description' => t('Show data details as labels on chart? Note: recommended for print or on mobile devices.'),
     '#parents' => array_merge($parents, array('data_labels')),
   );
+  $form['display']['stacking'] = array(
+    '#title' => t('Stacking'),
+    '#type' => 'checkbox',
+    '#description' => t('Stack multiple data series for chart types that support stacking.'),
+    '#default_value' => !empty($options['stacking']),
+    '#parents' => array_merge($parents, array('stacking')),
+  );
+  $form['display']['accessible_table'] = array(
+    '#title' => t('Accessible data table'),
+    '#type' => 'select',
+    '#options' => array(
+      'disabled' => t('Disabled'),
+      'collapsible' => t('Collapsible'),
+      'visible' => t('Visible'),
+      'invisible' => t('Visually hidden'),
+    ),
+    '#description' => t('Provide an HTML table alternative for the chart data.'),
+    '#default_value' => $options['accessible_table'],
+    '#parents' => array_merge($parents, array('accessible_table')),
+  );
+  $form['display']['accessible_table_button_text'] = array(
+    '#title' => t('Accessible table button text'),
+    '#type' => 'textfield',
+    '#default_value' => $options['accessible_table_button_text'],
+    '#states' => array(
+      'visible' => array(
+        ':input[name="' . charts_form_input_name(array_merge($parents, array('accessible_table'))) . '"]' => array('value' => 'collapsible'),
+      ),
+    ),
+    '#parents' => array_merge($parents, array('accessible_table_button_text')),
+  );
+  $form['display']['accessible_table_button_class'] = array(
+    '#title' => t('Accessible table button class'),
+    '#type' => 'textfield',
+    '#default_value' => $options['accessible_table_button_class'],
+    '#parents' => array_merge($parents, array('accessible_table_button_class')),
+  );
 
   $form['display']['legend_position'] = array(
     '#title' => t('Legend position'),
@@ -166,6 +263,12 @@ function charts_settings_form($form, $defaults = array(), $field_options = array
     '#default_value' => $options['legend_position'],
     '#parents' => array_merge($parents, array('legend_position')),
   );
+  $form['display']['legend_labels_color'] = array(
+    '#title' => t('Legend labels color'),
+    '#type' => 'color',
+    '#default_value' => $options['legend_labels_color'],
+    '#parents' => array_merge($parents, array('legend_labels_color')),
+  );
 
   $form['display']['colors'] = array(
     '#title' => t('Chart colors'),
@@ -175,8 +278,7 @@ function charts_settings_form($form, $defaults = array(), $field_options = array
   );
   for ($color_count = 0; $color_count < 10; $color_count++) {
     $form['display']['colors'][$color_count] = array(
-      '#type' => 'textfield',
-      '#attributes' => array('TYPE' => 'color'),
+      '#type' => 'color',
       '#size' => 10,
       '#maxlength' => 7,
       '#theme_wrappers' => array(),
@@ -189,9 +291,9 @@ function charts_settings_form($form, $defaults = array(), $field_options = array
     '#title' => t('Background color'),
     '#type' => 'textfield',
     '#size' => 10,
-    '#maxlength' => 7,
+    '#maxlength' => 25,
     '#attributes' => array('placeholder' => t('transparent')),
-    '#description' => t('Leave blank for a transparent background.'),
+    '#description' => t('Enter a color (e.g. #ffffff, rgb(255,255,255)) or "transparent".'),
     '#default_value' => $options['background'],
     '#parents' => array_merge($parents, array('background')),
   );
@@ -245,6 +347,12 @@ function charts_settings_form($form, $defaults = array(), $field_options = array
     '#default_value' => $options['xaxis_title'],
     '#parents' => array_merge($parents, array('xaxis_title')),
   );
+  $form['xaxis']['labels_color'] = array(
+    '#title' => t('Labels color'),
+    '#type' => 'color',
+    '#default_value' => $options['xaxis_labels_color'],
+    '#parents' => array_merge($parents, array('xaxis_labels_color')),
+  );
   $form['xaxis']['labels_rotation'] = array(
     '#title' => t('Labels rotation'),
     '#type' => 'select',
@@ -273,6 +381,12 @@ function charts_settings_form($form, $defaults = array(), $field_options = array
     '#type' => 'textfield',
     '#default_value' => $options['yaxis_title'],
     '#parents' => array_merge($parents, array('yaxis_title')),
+  );
+  $form['yaxis']['labels_color'] = array(
+    '#title' => t('Labels color'),
+    '#type' => 'color',
+    '#default_value' => $options['yaxis_labels_color'],
+    '#parents' => array_merge($parents, array('yaxis_labels_color')),
   );
   $form['yaxis']['minmax'] = array(
     '#title' => t('Value range'),
@@ -352,6 +466,18 @@ function charts_settings_form($form, $defaults = array(), $field_options = array
 }
 
 /**
+ * Converts form parents to an HTML input name.
+ */
+function charts_form_input_name($parents) {
+  $parents = array_values($parents);
+  $name = array_shift($parents);
+  foreach ($parents as $parent) {
+    $name .= '[' . $parent . ']';
+  }
+  return $name;
+}
+
+/**
  * Menu callback; Configure the site-wide defaults for charts.
  */
 function charts_default_settings_form($form, $form_state) {
@@ -388,8 +514,27 @@ function charts_default_settings_form($form, $form_state) {
     '#type' => 'submit',
     '#value' => t('Save defaults'),
   );
+  $form['#validate'][] = 'charts_default_settings_form_validate';
 
   return $form;
+}
+
+/**
+ * Validate handler for charts_default_settings_form().
+ */
+function charts_default_settings_form_validate($form, &$form_state) {
+  if (empty($form_state['values']['charts_default_settings'])) {
+    return;
+  }
+
+  $settings = $form_state['values']['charts_default_settings'];
+  if (empty($settings['library']) || empty($settings['type'])) {
+    return;
+  }
+
+  if (!charts_library_supports_type($settings['library'], $settings['type'])) {
+    form_set_error('charts_default_settings][type', t('The selected chart type is not supported by the selected charting library.'));
+  }
 }
 
 /**
@@ -410,10 +555,16 @@ function charts_default_settings() {
   $defaults['data_fields'] = NULL;
   $defaults['field_colors'] = NULL;
   $defaults['title'] = '';
+  $defaults['title_color'] = '#000000';
   $defaults['title_position'] = 'out';
   $defaults['data_labels'] = FALSE;
+  $defaults['stacking'] = FALSE;
+  $defaults['accessible_table'] = 'disabled';
+  $defaults['accessible_table_button_text'] = '';
+  $defaults['accessible_table_button_class'] = 'button';
   $defaults['legend'] = TRUE;
   $defaults['legend_position'] = 'right';
+  $defaults['legend_labels_color'] = '#000000';
   $defaults['colors'] = charts_default_colors();
   $defaults['background'] = '';
   $defaults['tooltips'] = TRUE;
@@ -422,9 +573,11 @@ function charts_default_settings() {
   $defaults['height'] = NULL;
 
   $defaults['xaxis_title'] = '';
+  $defaults['xaxis_labels_color'] = '#000000';
   $defaults['xaxis_labels_rotation'] = 0;
 
   $defaults['yaxis_title'] = '';
+  $defaults['yaxis_labels_color'] = '#000000';
   $defaults['yaxis_min'] = '';
   $defaults['yaxis_max'] = '';
   $defaults['yaxis_prefix'] = '';

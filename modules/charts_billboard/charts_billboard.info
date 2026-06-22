@@ -1,0 +1,6 @@
+name = Billboard.js
+description = Charts module integration with Billboard.js.
+package = Charts
+backdrop = 1.x
+type = module
+dependencies[] = charts

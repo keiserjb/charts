@@ -65,7 +65,8 @@ function _charts_highcharts_type($renderable_type) {
  * Utility to populate main chart options.
  */
 function _charts_highcharts_populate_chart_options($chart, $chart_definition) {
-  $chart_definition['chart']['type'] = $chart['#chart_type'];
+  $chart_type = $chart['#chart_type'];
+  $chart_definition['chart']['type'] = $chart_type === 'donut' ? 'pie' : $chart_type;
   $chart_definition['title']['text'] = $chart['#title'] ? $chart['#title'] : '';
   $chart_definition['title']['style']['color'] = $chart['#title_color'];
   $chart_definition['title']['style']['fontWeight'] = $chart['#title_font_weight'];
@@ -83,11 +84,14 @@ function _charts_highcharts_populate_chart_options($chart, $chart_definition) {
   $chart_definition['plotOptions']['series']['dataLabels']['enabled'] = $chart['#data_labels'] ? TRUE : FALSE;
 
   // These changes are for consistency with Google. Perhaps too specific?
-  if ($chart['#chart_type'] === 'pie') {
+  if ($chart_type === 'pie' || $chart_type === 'donut') {
     $chart_definition['plotOptions']['pie']['dataLabels']['distance'] = -30;
     $chart_definition['plotOptions']['pie']['dataLabels']['color'] = 'white';
     $chart_definition['plotOptions']['pie']['dataLabels']['format'] = '{percentage:.1f}%';
     $chart_definition['tooltip']['pointFormat'] = '<b>{point.y} ({point.percentage:.1f}%)</b><br/>';
+    if ($chart_type === 'donut') {
+      $chart_definition['plotOptions']['pie']['innerSize'] = '60%';
+    }
   }
 
   $chart_definition['legend']['enabled'] = $chart['#legend'];
@@ -108,6 +112,7 @@ function _charts_highcharts_populate_chart_options($chart, $chart_definition) {
     $chart_definition['legend']['verticalAlign'] = 'middle';
     $chart_definition['legend']['layout'] = 'vertical';
   }
+  $chart_definition['legend']['itemStyle']['color'] = $chart['#legend_font_color'];
   $chart_definition['legend']['itemStyle']['fontWeight'] = $chart['#legend_font_weight'];
   $chart_definition['legend']['itemStyle']['fontStyle'] = $chart['#legend_font_style'];
   $chart_definition['legend']['itemStyle']['fontSize'] = $chart['#legend_font_size'];

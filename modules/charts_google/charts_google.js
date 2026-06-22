@@ -6,25 +6,37 @@
 
 Backdrop.behaviors.chartsGoogle = {};
 Backdrop.behaviors.chartsGoogle.attach = function(context, settings) {
-  // First time loading in Views preview may not work because the Google JS
-  // API may not yet be loaded.
-  if (typeof google !== 'undefined') {
-    google.load('visualization', '1', { callback: renderCharts, packages: ['corechart'] });
+  // Google API script may not be ready on first AJAX attach.
+  if (typeof google === 'undefined' || typeof google.load !== 'function') {
+    Backdrop.behaviors.chartsGoogle._attempts = (Backdrop.behaviors.chartsGoogle._attempts || 0) + 1;
+    if (!Backdrop.behaviors.chartsGoogle._retryPending && Backdrop.behaviors.chartsGoogle._attempts <= 50) {
+      Backdrop.behaviors.chartsGoogle._retryPending = true;
+      setTimeout(function() {
+        Backdrop.behaviors.chartsGoogle._retryPending = false;
+        Backdrop.behaviors.chartsGoogle.attach(document, settings);
+      }, 100);
+    }
+    return;
   }
+  Backdrop.behaviors.chartsGoogle._attempts = 0;
+  google.load('visualization', '1', { callback: renderCharts, packages: ['corechart', 'table', 'gauge'] });
 
   // Redraw charts on window resize.
   var debounce;
-  $(window).resize(function() {
-    clearTimeout(debounce);
-    debounce = setTimeout(function() {
-      $('.charts-google').each(function() {
-        var wrap = $(this).data('chartsGoogleWrapper');
-        if (wrap) {
-          wrap.draw(this);
-        }
-      });
-    }, 75);
-  });
+  if (!Backdrop.behaviors.chartsGoogle._resizeBound) {
+    Backdrop.behaviors.chartsGoogle._resizeBound = true;
+    $(window).on('resize', function() {
+      clearTimeout(debounce);
+      debounce = setTimeout(function() {
+        $('.charts-google').each(function() {
+          var wrap = $(this).data('chartsGoogleWrapper');
+          if (wrap) {
+            wrap.draw(this);
+          }
+        });
+      }, 75);
+    });
+  }
 
   function renderCharts() {
     $('.charts-google', context).once('charts-google', function() {

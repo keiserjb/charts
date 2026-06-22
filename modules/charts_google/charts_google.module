@@ -7,7 +7,7 @@ function charts_google_charts_info() {
   $info['google'] = array(
     'label' => t('Google Charts'),
     'render' => '_charts_google_render',
-    'types' => array('area', 'bar', 'column', 'line', 'pie', 'scatter'),
+    'types' => array('area', 'bar', 'boxplot', 'bubble', 'candlestick', 'column', 'donut', 'gauge', 'line', 'pie', 'scatter', 'spline', 'table'),
     'file' => 'charts_google.inc',
   );
   return $info;

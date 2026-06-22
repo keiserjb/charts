@@ -1,0 +1,6 @@
+{
+  "_config_name": "charts_chartjs.settings",
+  "library_source": "bundled",
+  "cdn_url": "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
+  "custom_url": ""
+}

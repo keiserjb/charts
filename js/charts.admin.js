@@ -6,69 +6,114 @@
 
 Backdrop.behaviors.chartsAdmin = {};
 Backdrop.behaviors.chartsAdmin.attach = function(context, settings) {
+  var libraryTypeMap = settings.chartsAdmin && settings.chartsAdmin.libraryTypeMap ? settings.chartsAdmin.libraryTypeMap : {};
+
+  function filterTypesByLibrary($radios) {
+    var $form = $radios.closest('form');
+    var $librarySelect = $form.find('.chart-library-select');
+    if (!$librarySelect.length) {
+      return;
+    }
+
+    var selectedLibrary = $librarySelect.val();
+    var supportedTypes = libraryTypeMap[selectedLibrary];
+    if (!supportedTypes || !supportedTypes.length) {
+      return;
+    }
+
+    var checkedAndSupported = false;
+    $radios.find('input:radio').each(function() {
+      var $radio = $(this);
+      var isSupported = $.inArray($radio.val(), supportedTypes) !== -1;
+      $radio.prop('disabled', !isSupported);
+      $radio.closest('.form-item').toggle(isSupported);
+      if (isSupported && $radio.is(':checked')) {
+        checkedAndSupported = true;
+      }
+    });
+
+    if (!checkedAndSupported) {
+      var $firstSupported = $radios.find('input:radio:not(:disabled):first');
+      if ($firstSupported.length) {
+        $firstSupported.prop('checked', true);
+      }
+    }
+  }
+
   // Change options based on the chart type selected.
   $(context).find('.form-radios.chart-type-radios').once('charts-axis-inverted', function() {
+    var $radios = $(this);
+    var $form = $radios.closest('form');
+    var xAxisLabel = $form.find('fieldset.chart-xaxis .fieldset-title').html();
+    var yAxisLabel = $form.find('fieldset.chart-yaxis .fieldset-title').html();
 
     // Manually attach collapsible fieldsets first.
     if (Backdrop.behaviors.collapse) {
       Backdrop.behaviors.collapse.attach(context, settings);
     }
 
-    var xAxisLabel = $('fieldset.chart-xaxis .fieldset-title').html();
-    var yAxisLabel = $('fieldset.chart-yaxis .fieldset-title').html();
-
-    $(this).find('input:radio').change(function() {
+    $radios.find('input:radio').change(function() {
       if ($(this).is(':checked')) {
-        var groupingField = $(this).closest('form').find('.charts-grouping-field').val();
+        var groupingField = $form.find('.charts-grouping-field').val();
 
         // Flip X/Y axis fieldset labels for inverted chart types.
         if ($(this).attr('data-axis-inverted')) {
-          $('fieldset.chart-xaxis .fieldset-title').html(yAxisLabel);
-          $('fieldset.chart-xaxis .axis-inverted-show').closest('.form-item').show();
-          $('fieldset.chart-xaxis .axis-inverted-hide').closest('.form-item').hide();
-          $('fieldset.chart-yaxis .fieldset-title').html(xAxisLabel);
-          $('fieldset.chart-yaxis .axis-inverted-show').closest('.form-item').show();
-          $('fieldset.chart-yaxis .axis-inverted-hide').closest('.form-item').hide();
+          $form.find('fieldset.chart-xaxis .fieldset-title').html(yAxisLabel);
+          $form.find('fieldset.chart-xaxis .axis-inverted-show').closest('.form-item').show();
+          $form.find('fieldset.chart-xaxis .axis-inverted-hide').closest('.form-item').hide();
+          $form.find('fieldset.chart-yaxis .fieldset-title').html(xAxisLabel);
+          $form.find('fieldset.chart-yaxis .axis-inverted-show').closest('.form-item').show();
+          $form.find('fieldset.chart-yaxis .axis-inverted-hide').closest('.form-item').hide();
         }
         else {
-          $('fieldset.chart-xaxis .fieldset-title').html(xAxisLabel);
-          $('fieldset.chart-xaxis .axis-inverted-show').closest('.form-item').hide();
-          $('fieldset.chart-xaxis .axis-inverted-hide').closest('.form-item').show();
-          $('fieldset.chart-yaxis .fieldset-title').html(yAxisLabel);
-          $('fieldset.chart-yaxis .axis-inverted-show').closest('.form-item').hide();
-          $('fieldset.chart-yaxis .axis-inverted-hide').closest('.form-item').show();
+          $form.find('fieldset.chart-xaxis .fieldset-title').html(xAxisLabel);
+          $form.find('fieldset.chart-xaxis .axis-inverted-show').closest('.form-item').hide();
+          $form.find('fieldset.chart-xaxis .axis-inverted-hide').closest('.form-item').show();
+          $form.find('fieldset.chart-yaxis .fieldset-title').html(yAxisLabel);
+          $form.find('fieldset.chart-yaxis .axis-inverted-show').closest('.form-item').hide();
+          $form.find('fieldset.chart-yaxis .axis-inverted-hide').closest('.form-item').show();
         }
 
         // Show color options for single axis settings.
         if ($(this).attr('data-axis-single')) {
-          $('fieldset.chart-xaxis').hide();
-          $('fieldset.chart-yaxis').hide();
-          $('th.chart-field-color, td.chart-field-color').hide();
-          $('div.chart-colors').show();
+          $form.find('fieldset.chart-xaxis').hide();
+          $form.find('fieldset.chart-yaxis').hide();
+          $form.find('th.chart-field-color, td.chart-field-color').hide();
+          $form.find('div.chart-colors').show();
         }
         else {
-          $('fieldset.chart-xaxis').show();
-          $('fieldset.chart-yaxis').show();
+          $form.find('fieldset.chart-xaxis').show();
+          $form.find('fieldset.chart-yaxis').show();
           if (groupingField) {
-            $('th.chart-field-color, td.chart-field-color').hide();
-            $('div.chart-colors').show();
+            $form.find('th.chart-field-color, td.chart-field-color').hide();
+            $form.find('div.chart-colors').show();
           }
           else {
-            $('th.chart-field-color, td.chart-field-color').show();
-            $('div.chart-colors').hide();
+            $form.find('th.chart-field-color, td.chart-field-color').show();
+            $form.find('div.chart-colors').hide();
           }
         }
       }
     });
 
+    $form.find('.chart-library-select').once('charts-library-type-filter').change(function() {
+      var $currentForm = $(this).closest('form');
+      $currentForm.find('.form-radios.chart-type-radios').each(function() {
+        filterTypesByLibrary($(this));
+        $(this).find('input:radio:checked').triggerHandler('change');
+      });
+    });
+
+    filterTypesByLibrary($radios);
+
     // Set the initial values.
-    $(this).find('input:radio:checked').triggerHandler('change');
+    $radios.find('input:radio:checked').triggerHandler('change');
   });
 
   // React to the setting of a group field.
   $(context).find('.charts-grouping-field').once('charts-grouping', function() {
     $(this).change(function() {
-      $form = $(this).closest('form');
+      var $form = $(this).closest('form');
 
       // Hide the entire grouping field row, since no settings are applicable.
       var value = $(this).val();
@@ -96,9 +141,10 @@ Backdrop.behaviors.chartsAdmin.attach = function(context, settings) {
     var $radio = $(this);
     $radio.change(function() {
       if ($radio.is(':checked')) {
-        $('.chart-data-field input').show();
-        $('.chart-field-color input').show();
-        $('input.chart-field-disabled').remove();
+        var $form = $radio.closest('form');
+        $form.find('.chart-data-field input').show();
+        $form.find('.chart-field-color input').show();
+        $form.find('input.chart-field-disabled').remove();
         $radio.closest('tr').find('.chart-data-field input').hide().after('<input type="checkbox" name="chart_field_disabled" disabled="disabled" class="chart-field-disabled" />');
         $radio.closest('tr').find('.chart-field-color input').hide();
       }

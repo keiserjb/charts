@@ -44,10 +44,17 @@ function _charts_google_visualization_type($renderable_type) {
   $types = array(
     'area' => 'AreaChart',
     'bar' => 'BarChart',
+    'boxplot' => 'LineChart',
+    'candlestick' => 'CandlestickChart',
     'column' => 'ColumnChart',
     'line' => 'LineChart',
+    'spline' => 'LineChart',
     'pie' => 'PieChart',
+    'donut' => 'PieChart',
+    'gauge' => 'Gauge',
     'scatter' => 'ScatterChart',
+    'bubble' => 'BubbleChart',
+    'table' => 'Table',
   );
   backdrop_alter('charts_google_visualization_types', $types);
   return isset($types[$renderable_type]) ? $types[$renderable_type] : FALSE;
@@ -74,6 +81,23 @@ function _charts_google_populate_chart_options($chart, $chart_definition) {
   $chart_definition['options']['legend']['position'] = $chart['#legend_position'] ? $chart['#legend_position'] : 'none';
   $chart_definition['options']['legend']['alignment'] = 'center';
   $chart_definition['options']['interpolateNulls'] = TRUE;
+  if ($chart['#chart_type'] === 'donut') {
+    $chart_definition['options']['pieHole'] = 0.4;
+  }
+  if ($chart['#chart_type'] === 'bubble') {
+    $chart_definition['options']['bubble']['textStyle']['fontSize'] = 11;
+  }
+  if ($chart['#chart_type'] === 'gauge') {
+    $y_axis = array();
+    foreach (element_children($chart) as $child_key) {
+      if (!empty($chart[$child_key]['#type']) && $chart[$child_key]['#type'] === 'chart_yaxis') {
+        $y_axis = $chart[$child_key];
+        break;
+      }
+    }
+    $chart_definition['options']['min'] = isset($y_axis['#min']) && $y_axis['#min'] !== '' ? (float) $y_axis['#min'] : 0;
+    $chart_definition['options']['max'] = isset($y_axis['#max']) && $y_axis['#max'] !== '' ? (float) $y_axis['#max'] : 100;
+  }
 
   // TODO: Legend title (and thus these properties) not supported by Google.
   $chart_definition['options']['legend']['title'] = $chart['#legend_title'];
@@ -81,6 +105,7 @@ function _charts_google_populate_chart_options($chart, $chart_definition) {
   $chart_definition['options']['legend']['titleTextStyle']['italic'] = $chart['#legend_title_font_style'] === 'italic' ? TRUE : FALSE;
   $chart_definition['options']['legend']['titleTextStyle']['fontSize'] = $chart['#legend_title_font_size'];
 
+  $chart_definition['options']['legend']['textStyle']['color'] = $chart['#legend_font_color'];
   $chart_definition['options']['legend']['textStyle']['bold'] = $chart['#legend_font_weight'] === 'bold' ? TRUE : FALSE;
   $chart_definition['options']['legend']['textStyle']['italic'] = $chart['#legend_font_style'] === 'italic' ? TRUE : FALSE;
   $chart_definition['options']['legend']['textStyle']['fontSize'] = $chart['#legend_font_size'];

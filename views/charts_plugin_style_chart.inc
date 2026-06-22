@@ -18,7 +18,7 @@ class charts_plugin_style_chart extends views_plugin_style {
 
     // Get the default chart values
     module_load_include('inc', 'charts', 'includes/charts.pages');
-    $defaults = config_get('charts.settings', 'charts_default_settings');
+    $defaults = config_get('charts.settings', 'charts_default_settings') ?: array();
     $defaults += charts_default_settings();
     foreach ($defaults as $default_key => $default_value) {
       $options[$default_key]['default'] = $default_value;
@@ -66,13 +66,16 @@ class charts_plugin_style_chart extends views_plugin_style {
 
     // Reduce the options if this is a chart extension.
     if ($parent_display = $this->get_parent_chart_display()) {
-      $parent_chart_type = chart_get_type($parent_display->display_options['style_options']['type']);
+      $parent_style_options = isset($parent_display->display_options['style_options']) ? $parent_display->display_options['style_options'] : array();
+      $parent_display_type = !empty($parent_style_options['type']) ? $parent_style_options['type'] : '';
+      $parent_chart_type = chart_get_type($parent_display_type);
+      $parent_chart_type_label = $parent_chart_type ? $parent_chart_type['label'] : $parent_display_type;
       if (empty($form['type']['#default_value'])) {
-        $form['type']['#default_value'] = $parent_display->display_options['style_options']['type'];
+        $form['type']['#default_value'] = $parent_display_type;
       }
 
       $form['type']['#description'] = empty($form['type']['#description']) ? '' : $form['type']['#description'] . ' ';
-      $form['type']['#description'] .= t('This chart will be combined with the parent display "@display_title", which is a "@type" chart. Not all chart types may be combined. Selecting a different chart type than the parent may cause errors.', array('@display_title' => $parent_display->display_title, '@type' => $parent_chart_type['label']));
+      $form['type']['#description'] .= t('This chart will be combined with the parent display "@display_title", which is a "@type" chart. Not all chart types may be combined. Selecting a different chart type than the parent may cause errors.', array('@display_title' => $parent_display->display_title, '@type' => $parent_chart_type_label));
       $form['fields']['label_field']['#disabled'] = TRUE;
       $form['display']['#access'] = FALSE;
       $form['xaxis']['#access'] = FALSE;
@@ -83,6 +86,22 @@ class charts_plugin_style_chart extends views_plugin_style {
         $form['yaxis']['#title'] = t('Secondary axis');
         $form['yaxis']['#attributes']['class'] = array();
       }
+    }
+  }
+
+  /**
+   * Generate a form for setting options.
+   */
+  function options_validate(&$form, &$form_state) {
+    parent::options_validate($form, $form_state);
+
+    $style_options = isset($form_state['values']['style_options']) ? $form_state['values']['style_options'] : array();
+    if (empty($style_options['library']) || empty($style_options['type'])) {
+      return;
+    }
+
+    if (!charts_library_supports_type($style_options['library'], $style_options['type'])) {
+      form_set_error('style_options][type', t('The selected chart type is not supported by the selected charting library.'));
     }
   }
 
@@ -104,8 +123,8 @@ class charts_plugin_style_chart extends views_plugin_style {
     $field_handlers = $this->display->handler->get_handlers('field');
 
     // Don't execute validation on the new view page.
-    if ($_GET['q'] === 'admin/structure/views/add') {
-      return;
+    if (isset($_GET['q']) && $_GET['q'] === 'admin/structure/views/add') {
+      return $errors;
     }
 
     // Make sure that all chart extensions first have a parent chart selected.
@@ -134,6 +153,12 @@ class charts_plugin_style_chart extends views_plugin_style {
    */
   function render() {
     $field_handlers = $this->display->handler->get_handlers('field');
+    if (empty($field_handlers)) {
+      return array(
+        '#type' => 'markup',
+        '#markup' => t('No chart fields are available. Add at least one field to this view.'),
+      );
+    }
 
     // Calculate the labels field alias.
     $label_field = FALSE;
@@ -144,7 +169,7 @@ class charts_plugin_style_chart extends views_plugin_style {
     }
 
     // Assemble the fields to be used to provide data access.
-    $data_field_options = array_filter($this->options['data_fields']);
+    $data_field_options = array_filter((array) $this->options['data_fields']);
     $data_fields = array();
     foreach ($data_field_options as $field_key) {
       if (isset($field_handlers[$field_key])) {
@@ -155,6 +180,12 @@ class charts_plugin_style_chart extends views_plugin_style {
     if (isset($data_fields[$label_field_key])) {
       unset($data_fields[$label_field_key]);
     }
+    if (empty($data_fields)) {
+      return array(
+        '#type' => 'markup',
+        '#markup' => t('No chart data fields are configured. Select at least one data field in the chart settings.'),
+      );
+    }
 
     $chart_id = $this->view->name . '__' . $this->view->current_display;
     $chart = array(
@@ -164,30 +195,48 @@ class charts_plugin_style_chart extends views_plugin_style {
       '#chart_id' => $chart_id,
       '#id' => backdrop_clean_css_identifier('chart_' . $chart_id),
       '#title' => $this->options['title_position'] ? $this->options['title'] : FALSE,
+      '#title_color' => $this->options['title_color'],
       '#title_position' => $this->options['title_position'],
       '#tooltips' => $this->options['tooltips'],
       '#data_labels' => $this->options['data_labels'],
+      '#stacking' => !empty($this->options['stacking']),
+      '#accessible_table' => !empty($this->options['accessible_table']) ? $this->options['accessible_table'] : 'disabled',
+      '#accessible_table_button_text' => !empty($this->options['accessible_table_button_text']) ? $this->options['accessible_table_button_text'] : '',
+      '#accessible_table_button_class' => !empty($this->options['accessible_table_button_class']) ? $this->options['accessible_table_button_class'] : 'button',
       '#colors' => ($this->options['type'] != 'geomap') ? $this->options['colors'] : FALSE,
       '#background' => $this->options['background'] ? $this->options['background'] : 'transparent',
       '#legend' => $this->options['legend_position'] ? TRUE : FALSE,
       '#legend_position' => $this->options['legend_position'] ? $this->options['legend_position'] : NULL,
+      '#legend_font_color' => $this->options['legend_labels_color'],
       '#width' => $this->options['width'],
       '#height' => $this->options['height'],
       '#view' => $this->view, // pass info about the actual view results to allow further processing
     );
     $chart_type_info = chart_get_type($this->options['type']);
+    if (!$chart_type_info) {
+      return array(
+        '#type' => 'markup',
+        '#markup' => t('Unknown chart type: @type', array('@type' => $this->options['type'])),
+      );
+    }
 
     if ($chart_type_info['axis'] === CHARTS_SINGLE_AXIS) {
       $data_field_key = key($data_fields);
       $data_field = $data_fields[$data_field_key];
 
       $data = array();
+      $labels = array();
       $renders = $this->render_fields($this->view->result);
       foreach ($renders as $row_number => $row) {
         $data_row = array();
         if ($label_field_key) {
           // Labels need to be decoded, as the charting library will re-encode.
-          $data_row[] = htmlspecialchars_decode($this->get_field($row_number, $label_field_key), ENT_QUOTES);
+          $label = htmlspecialchars_decode($this->get_field($row_number, $label_field_key), ENT_QUOTES);
+          $data_row[] = $label;
+          $labels[] = $label;
+        }
+        else {
+          $labels[] = '';
         }
         $value = $this->get_field($row_number, $data_field_key);
         // Convert empty strings to NULL.
@@ -206,21 +255,26 @@ class charts_plugin_style_chart extends views_plugin_style {
         $chart['#legend_title'] = $label_field->options['label'];
       }
 
+      $chart['#labels'] = $labels;
       $chart[$this->view->current_display . '_series'] = array(
         '#type' => 'chart_data',
         '#data' => $data,
         '#title' => $data_field->options['label'],
+        '#labels' => $labels,
       );
     }
     else {
       $chart['xaxis'] = array(
         '#type' => 'chart_xaxis',
         '#title' => $this->options['xaxis_title'] ? $this->options['xaxis_title'] : FALSE,
+        '#labels_color' => $this->options['xaxis_labels_color'],
         '#labels_rotation' => $this->options['xaxis_labels_rotation'],
+        '#labels' => array(),
       );
       $chart['yaxis'] = array(
         '#type' => 'chart_yaxis',
         '#title' => $this->options['yaxis_title'] ? $this->options['yaxis_title'] : FALSE,
+        '#labels_color' => $this->options['yaxis_labels_color'],
         '#labels_rotation' => $this->options['yaxis_labels_rotation'],
         '#max' => $this->options['yaxis_max'],
         '#min' => $this->options['yaxis_min'],
@@ -247,8 +301,9 @@ class charts_plugin_style_chart extends views_plugin_style {
         // looping through the rows.
         $row_number = 0;
         foreach ($data_set['rows'] as $result_number => $row) {
-          if ($label_field_key && !isset($chart['xaxis']['#labels'][$row_number])) {
-            $chart['xaxis']['#labels'][$row_number] = $this->get_field($result_number, $label_field_key);
+          $label = $label_field_key ? $this->get_field($result_number, $label_field_key) : '';
+          if (!isset($chart['xaxis']['#labels'][$row_number])) {
+            $chart['xaxis']['#labels'][$row_number] = $label;
           }
           foreach ($data_fields as $field_key => $field_handler) {
             // Don't allow the grouping field to provide data.
@@ -354,7 +409,7 @@ class charts_plugin_style_chart extends views_plugin_style {
    */
   function get_parent_chart_display() {
     $parent_display = FALSE;
-    if ($this->plugin_name === 'chart_extension' && $this->display && $this->display->handler->options['parent_display']) {
+    if ($this->plugin_name === 'chart_extension' && $this->display && !empty($this->display->handler->options['parent_display'])) {
       $parent_display_name = $this->display->handler->get_option('parent_display');
       if (isset($this->view->display[$parent_display_name])) {
         $parent_display = $this->view->display[$parent_display_name];
@@ -374,7 +429,7 @@ class charts_plugin_style_chart extends views_plugin_style {
     $children_displays = array();
     foreach ($this->view->display as $display_name => $display) {
       $display_enabled = $this->view->display[$display_name]->handler->get_option('enabled');
-      if ($display->display_plugin === 'chart' && $display->display_options['parent_display'] && empty($display->deleted) && $display_enabled) {
+      if ($display->display_plugin === 'chart' && !empty($display->display_options['parent_display']) && empty($display->deleted) && $display_enabled) {
         $parent_display_name = $display->display_options['parent_display'];
         if ($parent_display_name === $this->view->current_display) {
           $children_displays[$display_name] = $this->view->display[$display_name];

@@ -1,0 +1,64 @@
+<?php
+/**
+ * @file
+ * Charts module integration with C3.js.
+ */
+
+/**
+ * Implements hook_charts_info().
+ */
+function charts_c3_charts_info() {
+  $info['c3'] = array(
+    'label' => t('C3'),
+    'render' => '_charts_c3_render',
+    'types' => array('area', 'bar', 'bubble', 'column', 'donut', 'gauge', 'line', 'pie', 'scatter', 'spline'),
+    'file' => 'charts_c3.inc',
+  );
+  return $info;
+}
+
+/**
+ * Implements hook_library_info().
+ */
+function charts_c3_library_info() {
+  $libraries['c3'] = array(
+    'title' => t('C3.js library'),
+    'version' => '0.7.20',
+    'js' => array(
+      array(
+        'data' => 'https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js',
+        'type' => 'external',
+      ),
+      array(
+        'data' => backdrop_get_path('module', 'charts_c3') . '/d3-c3-shim.js',
+        'type' => 'file',
+      ),
+      array(
+        'data' => 'https://cdn.jsdelivr.net/npm/c3@0.7.20/c3.min.js',
+        'type' => 'external',
+      ),
+    ),
+    'css' => array(
+      array(
+        'data' => 'https://cdn.jsdelivr.net/npm/c3@0.7.20/c3.min.css',
+        'type' => 'external',
+      ),
+    ),
+  );
+
+  $libraries['charts_c3'] = array(
+    'title' => t('C3 charts integration'),
+    'version' => '1.0',
+    'js' => array(
+      array(
+        'data' => backdrop_get_path('module', 'charts_c3') . '/charts_c3.js',
+        'type' => 'file',
+      ),
+    ),
+    'dependencies' => array(
+      array('charts_c3', 'c3'),
+    ),
+  );
+
+  return $libraries;
+}

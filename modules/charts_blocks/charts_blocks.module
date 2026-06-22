@@ -1,0 +1,408 @@
+<?php
+/**
+ * @file
+ * Provides configurable Charts blocks.
+ */
+
+/**
+ * Implements hook_help().
+ */
+function charts_blocks_help($path, $arg) {
+  if ($path === 'admin/help#charts_blocks') {
+    $output = '<h3>' . t('About') . '</h3>';
+    $output .= '<p>' . t('Create configurable chart blocks without using Views.') . '</p>';
+    return $output;
+  }
+}
+
+/**
+ * Implements hook_block_info().
+ */
+function charts_blocks_block_info() {
+  $blocks['charts_block'] = array(
+    'info' => t('Charts block'),
+    'description' => t('Create a chart from manually entered block data.'),
+    'cache' => BACKDROP_NO_CACHE,
+  );
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_configure().
+ */
+function charts_blocks_block_configure($delta = '', $settings = array()) {
+  $form = array();
+  if ($delta !== 'charts_block') {
+    return $form;
+  }
+
+  module_load_include('inc', 'charts', 'includes/charts.pages');
+
+  $chart_settings = charts_blocks_get_chart_settings($settings);
+  $defaults = charts_blocks_default_chart_settings();
+  $chart_settings += $defaults;
+  $chart_settings['settings'] += $defaults['settings'];
+  $chart_settings['data'] += $defaults['data'];
+
+  $form['chart'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Chart configuration'),
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+    '#tree' => TRUE,
+  );
+
+  $settings_form = array();
+  $settings_form = charts_settings_form($settings_form, $chart_settings['settings'], array(), array('chart', 'settings'));
+  $form['chart']['settings'] = $settings_form;
+
+  $form['chart']['data'] = charts_blocks_data_form($chart_settings['data']);
+
+  return $form;
+}
+
+/**
+ * Implements hook_block_save().
+ */
+function charts_blocks_block_save($delta = '', &$edit = array()) {
+  if ($delta !== 'charts_block' || empty($edit['chart'])) {
+    return;
+  }
+
+  $edit['chart'] = charts_blocks_normalize_chart_settings($edit['chart']);
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function charts_blocks_block_view($delta = '', $settings = array()) {
+  $block = array();
+  if ($delta !== 'charts_block') {
+    return $block;
+  }
+
+  $chart_settings = charts_blocks_get_chart_settings($settings);
+  $chart = charts_blocks_build_chart($chart_settings, $delta);
+
+  $block['subject'] = !empty($chart_settings['settings']['title']) ? $chart_settings['settings']['title'] : t('Chart');
+  $block['content'] = $chart;
+
+  return $block;
+}
+
+/**
+ * Builds the manual data section for the block configuration form.
+ */
+function charts_blocks_data_form($data_settings) {
+  $data_settings += charts_blocks_default_chart_settings()['data'];
+  $series = isset($data_settings['series']) && is_array($data_settings['series']) ? $data_settings['series'] : array();
+  $series_count = max(3, count($series) + 1);
+  $series_count = min($series_count, 10);
+
+  $form = array(
+    '#type' => 'fieldset',
+    '#title' => t('Chart data'),
+    '#collapsible' => TRUE,
+    '#collapsed' => FALSE,
+    '#tree' => TRUE,
+  );
+
+  $form['labels'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Labels'),
+    '#description' => t('Enter one label per line. Comma-separated labels are also supported.'),
+    '#default_value' => $data_settings['labels'],
+    '#rows' => 5,
+  );
+
+  $form['series'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Series'),
+    '#description' => t('Enter one numeric value per line for each series. Comma-separated values are also supported. Leave unused series empty.'),
+  );
+
+  for ($index = 0; $index < $series_count; $index++) {
+    $series_defaults = isset($series[$index]) && is_array($series[$index]) ? $series[$index] : array();
+    $series_defaults += array(
+      'title' => '',
+      'color' => '',
+      'values' => '',
+      'chart_type' => '',
+    );
+
+    $form['series'][$index] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Series @number', array('@number' => $index + 1)),
+      '#collapsible' => TRUE,
+      '#collapsed' => $index > 1 && empty($series_defaults['values']),
+      '#tree' => TRUE,
+    );
+    $form['series'][$index]['title'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Title'),
+      '#default_value' => $series_defaults['title'],
+    );
+    $form['series'][$index]['color'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Color'),
+      '#description' => t('Optional hex color, such as #2f7ed8. Leave empty to use the chart palette.'),
+      '#default_value' => $series_defaults['color'],
+      '#size' => 10,
+      '#maxlength' => 7,
+    );
+    $form['series'][$index]['values'] = array(
+      '#type' => 'textarea',
+      '#title' => t('Values'),
+      '#default_value' => $series_defaults['values'],
+      '#rows' => 4,
+    );
+    $form['series'][$index]['chart_type'] = array(
+      '#type' => 'select',
+      '#title' => t('Series chart type'),
+      '#description' => t('Optional. Use for combination charts when supported by the selected library.'),
+      '#options' => array('' => t('- Use main chart type -')) + charts_blocks_chart_type_options(),
+      '#default_value' => $series_defaults['chart_type'],
+    );
+  }
+
+  return $form;
+}
+
+/**
+ * Builds a chart render array from saved block settings.
+ */
+function charts_blocks_build_chart($chart_settings, $delta = 'charts_block') {
+  $defaults = charts_blocks_default_chart_settings();
+  $chart_settings += $defaults;
+  $chart_settings['settings'] += $defaults['settings'];
+  $chart_settings['data'] += $defaults['data'];
+
+  $settings = $chart_settings['settings'];
+  $data = $chart_settings['data'];
+  $chart_type = !empty($settings['type']) ? $settings['type'] : 'line';
+  $chart_type_info = chart_get_type($chart_type);
+  $single_axis = !empty($chart_type_info['axis']) && $chart_type_info['axis'] === CHARTS_SINGLE_AXIS;
+  $chart_id = 'charts_block__' . backdrop_clean_css_identifier($delta . '__' . substr(md5(serialize($chart_settings)), 0, 12));
+
+  $chart = array(
+    '#type' => 'chart',
+    '#chart_type' => $chart_type,
+    '#chart_library' => $settings['library'],
+    '#chart_id' => $chart_id,
+    '#id' => backdrop_html_id('chart-' . $chart_id),
+    '#title' => !empty($settings['title_position']) ? $settings['title'] : FALSE,
+    '#title_color' => $settings['title_color'],
+    '#title_position' => $settings['title_position'],
+    '#tooltips' => $settings['tooltips'],
+    '#data_labels' => $settings['data_labels'],
+    '#stacking' => !empty($settings['stacking']),
+    '#accessible_table' => !empty($settings['accessible_table']) ? $settings['accessible_table'] : 'disabled',
+    '#accessible_table_button_text' => !empty($settings['accessible_table_button_text']) ? $settings['accessible_table_button_text'] : '',
+    '#accessible_table_button_class' => !empty($settings['accessible_table_button_class']) ? $settings['accessible_table_button_class'] : 'button',
+    '#colors' => $settings['colors'],
+    '#background' => $settings['background'] ? $settings['background'] : 'transparent',
+    '#legend' => $settings['legend_position'] ? TRUE : FALSE,
+    '#legend_position' => $settings['legend_position'] ? $settings['legend_position'] : NULL,
+    '#legend_font_color' => $settings['legend_labels_color'],
+    '#width' => $settings['width'],
+    '#height' => $settings['height'],
+  );
+
+  $labels = charts_blocks_split_lines($data['labels']);
+  $series = charts_blocks_parse_series($data['series']);
+
+  if (empty($series)) {
+    $chart['empty'] = array(
+      '#type' => 'markup',
+      '#markup' => t('No chart data has been configured.'),
+    );
+    return $chart;
+  }
+
+  if ($single_axis) {
+    $first_series = reset($series);
+    $points = array();
+    foreach ($first_series['values'] as $index => $value) {
+      $points[] = array(isset($labels[$index]) ? $labels[$index] : t('Slice @number', array('@number' => $index + 1)), $value);
+    }
+    $chart['#labels'] = $labels;
+    $chart['series_0'] = array(
+      '#type' => 'chart_data',
+      '#title' => $first_series['title'],
+      '#data' => $points,
+      '#labels' => $labels,
+      '#color' => $first_series['color'],
+    );
+    return $chart;
+  }
+
+  $chart['xaxis'] = array(
+    '#type' => 'chart_xaxis',
+    '#title' => $settings['xaxis_title'] ? $settings['xaxis_title'] : FALSE,
+    '#labels_color' => $settings['xaxis_labels_color'],
+    '#labels_rotation' => $settings['xaxis_labels_rotation'],
+    '#labels' => charts_blocks_normalize_labels($labels, $series),
+  );
+  $chart['yaxis'] = array(
+    '#type' => 'chart_yaxis',
+    '#title' => $settings['yaxis_title'] ? $settings['yaxis_title'] : FALSE,
+    '#labels_color' => $settings['yaxis_labels_color'],
+    '#labels_rotation' => $settings['yaxis_labels_rotation'],
+    '#max' => $settings['yaxis_max'],
+    '#min' => $settings['yaxis_min'],
+  );
+
+  foreach ($series as $index => $series_item) {
+    $chart['series_' . $index] = array(
+      '#type' => 'chart_data',
+      '#title' => $series_item['title'],
+      '#data' => $series_item['values'],
+      '#color' => $series_item['color'],
+      '#prefix' => $settings['yaxis_prefix'] ? $settings['yaxis_prefix'] : NULL,
+      '#suffix' => $settings['yaxis_suffix'] ? $settings['yaxis_suffix'] : NULL,
+      '#decimal_count' => $settings['yaxis_decimal_count'] ? $settings['yaxis_decimal_count'] : NULL,
+    );
+    if (!empty($series_item['chart_type'])) {
+      $chart['series_' . $index]['#chart_type'] = $series_item['chart_type'];
+    }
+  }
+
+  return $chart;
+}
+
+/**
+ * Returns the block chart settings from current or older settings structures.
+ */
+function charts_blocks_get_chart_settings($settings) {
+  if (!empty($settings['chart']) && is_array($settings['chart'])) {
+    return charts_blocks_normalize_chart_settings($settings['chart']);
+  }
+  if (!empty($settings['block_settings']['chart']) && is_array($settings['block_settings']['chart'])) {
+    return charts_blocks_normalize_chart_settings($settings['block_settings']['chart']);
+  }
+  return charts_blocks_default_chart_settings();
+}
+
+/**
+ * Returns default chart block settings.
+ */
+function charts_blocks_default_chart_settings() {
+  module_load_include('inc', 'charts', 'includes/charts.pages');
+  $settings = config_get('charts.settings', 'charts_default_settings');
+  $settings = is_array($settings) ? $settings : array();
+  $settings += charts_default_settings();
+
+  return array(
+    'settings' => $settings,
+    'data' => array(
+      'labels' => "Jan\nFeb\nMar",
+      'series' => array(
+        array(
+          'title' => t('Series 1'),
+          'color' => '',
+          'values' => "10\n20\n30",
+          'chart_type' => '',
+        ),
+      ),
+    ),
+  );
+}
+
+/**
+ * Normalizes saved chart block settings.
+ */
+function charts_blocks_normalize_chart_settings($chart_settings) {
+  $defaults = charts_blocks_default_chart_settings();
+  $chart_settings = is_array($chart_settings) ? $chart_settings : array();
+  $chart_settings += $defaults;
+  $chart_settings['settings'] = !empty($chart_settings['settings']) && is_array($chart_settings['settings']) ? $chart_settings['settings'] + $defaults['settings'] : $defaults['settings'];
+  $chart_settings['data'] = !empty($chart_settings['data']) && is_array($chart_settings['data']) ? $chart_settings['data'] + $defaults['data'] : $defaults['data'];
+  $chart_settings['data']['series'] = !empty($chart_settings['data']['series']) && is_array($chart_settings['data']['series']) ? array_values($chart_settings['data']['series']) : array();
+
+  return $chart_settings;
+}
+
+/**
+ * Parses saved series settings into renderable series values.
+ */
+function charts_blocks_parse_series($series_settings) {
+  $series = array();
+  if (!is_array($series_settings)) {
+    return $series;
+  }
+
+  foreach ($series_settings as $index => $series_item) {
+    if (empty($series_item['values'])) {
+      continue;
+    }
+    $values = charts_blocks_split_lines($series_item['values']);
+    if (!$values) {
+      continue;
+    }
+    foreach ($values as $value_index => $value) {
+      $values[$value_index] = charts_blocks_parse_numeric_value($value);
+    }
+
+    $series[] = array(
+      'title' => !empty($series_item['title']) ? $series_item['title'] : t('Series @number', array('@number' => $index + 1)),
+      'color' => !empty($series_item['color']) ? $series_item['color'] : NULL,
+      'values' => $values,
+      'chart_type' => !empty($series_item['chart_type']) ? $series_item['chart_type'] : '',
+    );
+  }
+
+  return $series;
+}
+
+/**
+ * Splits textarea input into values.
+ */
+function charts_blocks_split_lines($input) {
+  $input = trim((string) $input);
+  if ($input === '') {
+    return array();
+  }
+  $input = str_replace(array("\r\n", "\r"), "\n", $input);
+  $parts = preg_split('/[\n,]+/', $input);
+  $parts = array_map('trim', $parts);
+  return array_values(array_filter($parts, 'strlen'));
+}
+
+/**
+ * Converts a manually entered numeric value to a chart value.
+ */
+function charts_blocks_parse_numeric_value($value) {
+  $value = trim((string) $value);
+  if ($value === '') {
+    return NULL;
+  }
+  $numeric = str_replace(array(',', ' '), '', $value);
+  return is_numeric($numeric) ? (float) $numeric : NULL;
+}
+
+/**
+ * Ensures x-axis labels match the longest configured series.
+ */
+function charts_blocks_normalize_labels($labels, $series) {
+  $max = 0;
+  foreach ($series as $series_item) {
+    $max = max($max, count($series_item['values']));
+  }
+
+  for ($index = count($labels); $index < $max; $index++) {
+    $labels[$index] = (string) ($index + 1);
+  }
+
+  return array_slice($labels, 0, $max);
+}
+
+/**
+ * Returns chart type options for form selects.
+ */
+function charts_blocks_chart_type_options() {
+  $options = array();
+  foreach (charts_type_info() as $type => $info) {
+    $options[$type] = $info['label'];
+  }
+  return $options;
+}

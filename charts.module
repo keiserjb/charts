@@ -80,6 +80,11 @@ function charts_element_info() {
     '#attributes' => array(), // Applied to the wrapper, not the chart.
     '#chart_library' => NULL, // If requiring a particular charting module.
     '#raw_options' => array(), // Raw library-specific options passed directly.
+    '#accessible_table' => 'disabled', // Options: disabled, collapsible, visible, invisible.
+    '#accessible_table_button_text' => '',
+    '#accessible_table_button_class' => 'button',
+    '#content_prefix' => array(),
+    '#content_suffix' => array(),
   );
 
   // Properties for x and y axes.
@@ -201,6 +206,12 @@ function charts_pre_render_element($element) {
   $charts_info = charts_info();
   $chart_library = isset($element['#chart_library']) ? $element['#chart_library'] : NULL;
 
+  if (empty($charts_info)) {
+    $element['#type'] = 'markup';
+    $element['#markup'] = t('No charting library found. Enable a charting module such as Google Charts or Highcharts.');
+    return $element;
+  }
+
   // Use the first charting library if the requested library is not available.
   if (isset($chart_library) && isset($charts_info[$chart_library])) {
     $chart_library_info = $charts_info[$chart_library];
@@ -217,10 +228,19 @@ function charts_pre_render_element($element) {
   }
 
   // Ensure there's an x and y axis to provide defaults.
-  $chart_type = chart_get_type($element['#chart_type']);
+  $chart_type_name = !empty($element['#chart_type']) ? $element['#chart_type'] : NULL;
+  $chart_type = chart_get_type($chart_type_name);
+  if (!$chart_type) {
+    $element['#type'] = 'markup';
+    $element['#markup'] = t('Unknown chart type: @type', array('@type' => $chart_type_name ? $chart_type_name : t('None')));
+    return $element;
+  }
   if ($chart_type['axis'] === CHARTS_DUAL_AXIS) {
+    $children_types = array();
     foreach (element_children($element) as $key) {
-      $children_types[] = $element[$key]['#type'];
+      if (isset($element[$key]['#type'])) {
+        $children_types[] = $element[$key]['#type'];
+      }
     }
     if (!in_array('chart_xaxis', $children_types)) {
       $element['xaxis'] = array('#type' => 'chart_xaxis');
@@ -251,6 +271,12 @@ function charts_pre_render_element($element) {
   $callback = $chart_library_info['render'];
   $element = $callback($element);
 
+  // In contexts like Views live preview (AJAX replace of pre-rendered markup),
+  // attached assets can be dropped. Force processing now so JS/CSS are present.
+  if (!empty($element['#attached'])) {
+    backdrop_process_attached(array('#attached' => $element['#attached']));
+  }
+
   if (!empty($element['#chart_definition'])) {
     $chart_definition = $element['#chart_definition'];
     unset($element['#chart_definition']);
@@ -265,6 +291,8 @@ function charts_pre_render_element($element) {
     // Set the element #chart_json property as a data-attribute.
     $element['#attributes']['data-chart'] = backdrop_json_encode($chart_definition);
   }
+
+  $element = charts_accessible_table_element($element);
 
   return $element;
 }
@@ -288,11 +316,103 @@ function charts_info() {
 }
 
 /**
+ * Checks if a chart type is supported by the selected charting library.
+ *
+ * @param string $library
+ *   The charting library machine name.
+ * @param string $chart_type
+ *   The chart type machine name.
+ * @param array|null $charts_info
+ *   (optional) Library definitions as returned by charts_info().
+ *
+ * @return bool
+ *   TRUE when supported, FALSE otherwise.
+ */
+function charts_library_supports_type($library, $chart_type, $charts_info = NULL) {
+  if (!$library || !$chart_type) {
+    return FALSE;
+  }
+
+  if (!isset($charts_info)) {
+    $charts_info = charts_info();
+  }
+
+  if (empty($charts_info[$library])) {
+    return FALSE;
+  }
+
+  // When a library doesn't declare explicit types, assume all are supported.
+  if (empty($charts_info[$library]['types']) || !is_array($charts_info[$library]['types'])) {
+    return TRUE;
+  }
+
+  return in_array($chart_type, $charts_info[$library]['types']);
+}
+
+/**
+ * Gets all chart type machine names supported by a charting library.
+ *
+ * @param string $library
+ *   The charting library machine name.
+ * @param array|null $charts_info
+ *   (optional) Library definitions as returned by charts_info().
+ *
+ * @return array
+ *   Chart type machine names keyed by chart type machine name.
+ */
+function charts_library_supported_types($library, $charts_info = NULL) {
+  $types = array();
+
+  if (!isset($charts_info)) {
+    $charts_info = charts_info();
+  }
+
+  if (empty($charts_info[$library])) {
+    return $types;
+  }
+
+  if (empty($charts_info[$library]['types']) || !is_array($charts_info[$library]['types'])) {
+    foreach (charts_type_info() as $chart_type => $chart_type_info) {
+      $types[$chart_type] = $chart_type;
+    }
+    return $types;
+  }
+
+  foreach ($charts_info[$library]['types'] as $chart_type) {
+    $types[$chart_type] = $chart_type;
+  }
+
+  return $types;
+}
+
+/**
+ * Gets chart type support map keyed by library machine name.
+ *
+ * @param array|null $charts_info
+ *   (optional) Library definitions as returned by charts_info().
+ *
+ * @return array
+ *   A map keyed by library machine name containing chart type machine names.
+ */
+function charts_library_type_map($charts_info = NULL) {
+  $map = array();
+  if (!isset($charts_info)) {
+    $charts_info = charts_info();
+  }
+
+  foreach ($charts_info as $library => $info) {
+    $map[$library] = array_values(charts_library_supported_types($library, $charts_info));
+  }
+
+  return $map;
+}
+
+/**
  * Retrieve a specific chart library.
  */
 function chart_get_library($library) {
   $info = charts_info();
-  return $info[$library] ? $info[$library] : FALSE;
+  return isset($info[$library]) ? $info[$library] : FALSE;
 }
 
 /**
@@ -320,7 +440,7 @@ function charts_type_info() {
  */
 function chart_get_type($chart_type) {
   $types = charts_type_info();
-  return $types[$chart_type] ? $types[$chart_type] : FALSE;
+  return isset($types[$chart_type]) ? $types[$chart_type] : FALSE;
 }
 
 /**
@@ -329,6 +449,14 @@ function chart_get_type($chart_type) {
 function charts_charts_type_info() {
   $chart_types['pie'] = array(
     'label' => t('Pie'),
+    'axis' => CHARTS_SINGLE_AXIS,
+  );
+  $chart_types['donut'] = array(
+    'label' => t('Donut'),
+    'axis' => CHARTS_SINGLE_AXIS,
+  );
+  $chart_types['gauge'] = array(
+    'label' => t('Gauge'),
     'axis' => CHARTS_SINGLE_AXIS,
   );
   $chart_types['bar'] = array(
@@ -351,9 +479,51 @@ function charts_charts_type_info() {
     'axis' => CHARTS_DUAL_AXIS,
     'stacking' => TRUE,
   );
+  $chart_types['arearange'] = array(
+    'label' => t('Area Range'),
+    'axis' => CHARTS_DUAL_AXIS,
+    'stacking' => TRUE,
+  );
+  $chart_types['boxplot'] = array(
+    'label' => t('Boxplot'),
+    'axis' => CHARTS_DUAL_AXIS,
+  );
+  $chart_types['bubble'] = array(
+    'label' => t('Bubble'),
+    'axis' => CHARTS_DUAL_AXIS,
+  );
+  $chart_types['candlestick'] = array(
+    'label' => t('Candlestick'),
+    'axis' => CHARTS_DUAL_AXIS,
+  );
+  $chart_types['dumbbell'] = array(
+    'label' => t('Dumbbell'),
+    'axis' => CHARTS_DUAL_AXIS,
+    'axis_inverted' => TRUE,
+  );
+  $chart_types['heatmap'] = array(
+    'label' => t('Heatmap'),
+    'axis' => CHARTS_DUAL_AXIS,
+  );
   $chart_types['scatter'] = array(
     'label' => t('Scatter'),
     'axis' => CHARTS_DUAL_AXIS,
+  );
+  $chart_types['spline'] = array(
+    'label' => t('Spline'),
+    'axis' => CHARTS_DUAL_AXIS,
+  );
+  $chart_types['table'] = array(
+    'label' => t('Table'),
+    'axis' => CHARTS_DUAL_AXIS,
+  );
+  $chart_types['polarArea'] = array(
+    'label' => t('Polar Area'),
+    'axis' => CHARTS_SINGLE_AXIS,
+  );
+  $chart_types['solidgauge'] = array(
+    'label' => t('Solid Gauge'),
+    'axis' => CHARTS_SINGLE_AXIS,
   );
   return $chart_types;
 }
@@ -363,9 +533,10 @@ function charts_charts_type_info() {
  */
 function charts_config_info() {
   $prefixes['charts.settings'] = array(
-    'label' => t('Module name settings'),
+    'label' => t('Charts settings'),
     'group' => t('Configuration'),
   );
+  return $prefixes;
 }
 
 /**
@@ -439,6 +610,135 @@ function charts_cast_element_integer_values(&$element) {
   }
 }
 
+/**
+ * Adds an accessible data table alternative to a chart element.
+ */
+function charts_accessible_table_element($element) {
+  $visibility = isset($element['#accessible_table']) ? $element['#accessible_table'] : 'disabled';
+  if ($visibility === 'disabled') {
+    return $element;
+  }
+
+  $table = charts_accessible_table_build($element);
+  if (empty($table['rows'])) {
+    return $element;
+  }
+
+  $table_markup = theme('table', $table);
+  if ($visibility === 'visible') {
+    $element['#content_suffix']['accessible_table'] = '<div class="charts-accessible-table-wrapper">' . $table_markup . '</div>';
+  }
+  elseif ($visibility === 'invisible') {
+    $element['#content_suffix']['accessible_table'] = '<div class="element-invisible charts-accessible-table-wrapper">' . $table_markup . '</div>';
+  }
+  elseif ($visibility === 'collapsible') {
+    $summary = !empty($element['#accessible_table_button_text']) ? $element['#accessible_table_button_text'] : t('View data table');
+    $class = !empty($element['#accessible_table_button_class']) ? ' class="' . check_plain($element['#accessible_table_button_class']) . '"' : '';
+    $element['#content_suffix']['accessible_table'] = '<details class="charts-accessible-table-wrapper"><summary' . $class . '>' . check_plain($summary) . '</summary>' . $table_markup . '</details>';
+  }
+
+  return $element;
+}
+
+/**
+ * Builds a table array from chart render data.
+ */
+function charts_accessible_table_build($element) {
+  $chart_type = !empty($element['#chart_type']) ? $element['#chart_type'] : 'line';
+  $type_info = chart_get_type($chart_type);
+  $single_axis = !empty($type_info['axis']) && $type_info['axis'] === CHARTS_SINGLE_AXIS;
+
+  $xaxis = array();
+  $series = array();
+  foreach (element_children($element) as $key) {
+    if (empty($element[$key]['#type'])) {
+      continue;
+    }
+    if ($element[$key]['#type'] === 'chart_xaxis') {
+      $xaxis = $element[$key];
+    }
+    elseif ($element[$key]['#type'] === 'chart_data') {
+      $series[] = array(
+        'title' => !empty($element[$key]['#title']) ? $element[$key]['#title'] : t('Series @n', array('@n' => count($series) + 1)),
+        'data' => !empty($element[$key]['#data']) ? $element[$key]['#data'] : array(),
+        'labels' => !empty($element[$key]['#labels']) ? $element[$key]['#labels'] : array(),
+      );
+    }
+  }
+
+  $categories = !empty($xaxis['#labels']) ? array_values($xaxis['#labels']) : array();
+  $table = array(
+    'attributes' => array(
+      'class' => array('charts-accessible-table'),
+    ),
+    'caption' => t('Data table for @title', array('@title' => !empty($element['#title']) ? $element['#title'] : t('Chart'))),
+    'header' => array(),
+    'rows' => array(),
+    'sticky' => FALSE,
+  );
+
+  if ($single_axis) {
+    $table['header'] = array(t('Label'), t('Value'));
+    $first_series = reset($series);
+    if (!$first_series) {
+      return $table;
+    }
+    $labels = $first_series['labels'] ? array_values($first_series['labels']) : $categories;
+    foreach ($first_series['data'] as $index => $point) {
+      if (is_array($point)) {
+        $label = isset($point[0]) ? $point[0] : (isset($labels[$index]) ? $labels[$index] : t('Slice @n', array('@n' => $index + 1)));
+        $value = isset($point[1]) ? $point[1] : '';
+      }
+      else {
+        $label = isset($labels[$index]) ? $labels[$index] : t('Slice @n', array('@n' => $index + 1));
+        $value = $point;
+      }
+      $table['rows'][] = array($label, charts_accessible_table_data_point($value));
+    }
+    return $table;
+  }
+
+  $table['header'][] = !empty($xaxis['#title']) ? $xaxis['#title'] : t('Category');
+  foreach ($series as $series_item) {
+    $table['header'][] = $series_item['title'];
+  }
+
+  $max_rows = 0;
+  foreach ($series as $series_item) {
+    $max_rows = max($max_rows, count($series_item['data']));
+  }
+
+  for ($index = 0; $index < $max_rows; $index++) {
+    $row = array(isset($categories[$index]) ? $categories[$index] : (string) ($index + 1));
+    foreach ($series as $series_item) {
+      $row[] = isset($series_item['data'][$index]) ? charts_accessible_table_data_point($series_item['data'][$index]) : '';
+    }
+    $table['rows'][] = $row;
+  }
+
+  return $table;
+}
+
+/**
+ * Converts complex chart data points to readable table cell values.
+ */
+function charts_accessible_table_data_point($point) {
+  if (is_scalar($point) || is_null($point)) {
+    return $point;
+  }
+  if (!is_array($point)) {
+    return '';
+  }
+
+  $parts = array();
+  foreach ($point as $key => $value) {
+    if (is_scalar($value)) {
+      $parts[] = is_numeric($key) ? $value : ucfirst($key) . ': ' . $value;
+    }
+  }
+  return implode(', ', $parts);
+}
+
 
 /**
  * Output the chart renderable as a string.
@@ -447,10 +747,17 @@ function theme_charts_chart($variables) {
   $element = $variables['element'];
 
   $attributes = $element['#attributes'];
+  if (!empty($attributes['class']) && is_array($attributes['class'])) {
+    $attributes['class'] = array_values(array_unique($attributes['class']));
+  }
   $attributes['id'] = $element['#id'];
   $attributes['class'][] = 'chart';
 
-  return '<div ' . backdrop_attributes($attributes) . '>' . (isset($element['#chart']) ? $element['#chart'] : '') . '</div>';
+  $content_prefix = !empty($element['#content_prefix']) ? implode('', $element['#content_prefix']) : '';
+  $content_suffix = !empty($element['#content_suffix']) ? implode('', $element['#content_suffix']) : '';
+  $chart = isset($element['#chart']) ? $element['#chart'] : '';
+
+  return $content_prefix . '<div ' . backdrop_attributes($attributes) . '>' . $chart . '</div>' . $content_suffix;
 }
 
 /**

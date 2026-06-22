@@ -7,6 +7,10 @@
         "title_position": "out",
         "tooltips": "",
         "data_labels": "",
+        "stacking": false,
+        "accessible_table": "disabled",
+        "accessible_table_button_text": "",
+        "accessible_table_button_class": "button",
         "legend_position": "right",
         "colors": [
             "#2f7ed8",

@@ -1,0 +1,196 @@
+<?php
+/**
+ * @file
+ * Integration with Chart.js library.
+ */
+
+/**
+ * Implements hook_charts_info().
+ */
+function charts_chartjs_charts_info() {
+  $info['chartjs'] = array(
+    'label' => t('Chart.js'),
+    'render' => '_charts_chartjs_render',
+    'file' => 'charts_chartjs.inc',
+    'types' => array('area', 'bar', 'bubble', 'column', 'donut', 'line', 'pie', 'polarArea', 'scatter', 'spline'),
+  );
+  return $info;
+}
+
+/**
+ * Implements hook_menu().
+ */
+function charts_chartjs_menu() {
+  $items['admin/config/content/charts/chartjs'] = array(
+    'title' => 'Chart.js settings',
+    'description' => 'Configure how the Chart.js library is loaded.',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => array('charts_chartjs_settings_form'),
+    'access arguments' => array('administer charts'),
+    'type' => MENU_LOCAL_TASK,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_config_info().
+ */
+function charts_chartjs_config_info() {
+  $prefixes['charts_chartjs.settings'] = array(
+    'label' => t('Chart.js settings'),
+    'group' => t('Configuration'),
+  );
+  return $prefixes;
+}
+
+/**
+ * Implements hook_library_info().
+ */
+function charts_chartjs_library_info() {
+  $chartjs_asset = charts_chartjs_library_asset();
+
+  $libraries['chartjs'] = array(
+    'title' => 'Chart.js',
+    'version' => '4.4.1',
+    'js' => array(
+      array(
+        'data' => $chartjs_asset['data'],
+        'type' => $chartjs_asset['type'],
+      ),
+      array(
+        'data' => backdrop_get_path('module', 'charts_chartjs') . '/charts_chartjs.js',
+        'type' => 'file',
+      ),
+    ),
+  );
+  return $libraries;
+}
+
+/**
+ * Returns the Chart.js asset definition.
+ */
+function charts_chartjs_library_asset() {
+  $settings = charts_chartjs_settings();
+  $source = $settings['library_source'];
+
+  if ($source === 'cdn') {
+    return array(
+      'data' => $settings['cdn_url'],
+      'type' => 'external',
+    );
+  }
+
+  if ($source === 'custom' && !empty($settings['custom_url'])) {
+    return array(
+      'data' => $settings['custom_url'],
+      'type' => 'external',
+    );
+  }
+
+  $bundled_path = backdrop_get_path('module', 'charts_chartjs') . '/library/chartjs/chart.umd.min.js';
+  if (file_exists(BACKDROP_ROOT . '/' . $bundled_path)) {
+    return array(
+      'data' => $bundled_path,
+      'type' => 'file',
+    );
+  }
+
+  return array(
+    'data' => $settings['cdn_url'],
+    'type' => 'external',
+  );
+}
+
+/**
+ * Settings form for the Chart.js provider.
+ */
+function charts_chartjs_settings_form($form, &$form_state) {
+  $settings = charts_chartjs_settings();
+
+  $form['library_source'] = array(
+    '#type' => 'radios',
+    '#title' => t('Chart.js library source'),
+    '#options' => array(
+      'bundled' => t('Bundled with the module'),
+      'cdn' => t('CDN'),
+      'custom' => t('Custom external URL'),
+    ),
+    '#default_value' => $settings['library_source'],
+    '#description' => t('The bundled option is self-contained. CDN and custom URL options load Chart.js from an external source.'),
+  );
+
+  $form['cdn_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('CDN URL'),
+    '#default_value' => $settings['cdn_url'],
+    '#states' => array(
+      'visible' => array(
+        ':input[name="library_source"]' => array('value' => 'cdn'),
+      ),
+    ),
+  );
+
+  $form['custom_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Custom external URL'),
+    '#default_value' => $settings['custom_url'],
+    '#states' => array(
+      'visible' => array(
+        ':input[name="library_source"]' => array('value' => 'custom'),
+      ),
+    ),
+  );
+
+  $form['actions']['#type'] = 'actions';
+  $form['actions']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Save configuration'),
+  );
+  $form['#validate'][] = 'charts_chartjs_settings_form_validate';
+
+  return $form;
+}
+
+/**
+ * Validate handler for charts_chartjs_settings_form().
+ */
+function charts_chartjs_settings_form_validate($form, &$form_state) {
+  $values = $form_state['values'];
+
+  if ($values['library_source'] === 'cdn' && !valid_url($values['cdn_url'], TRUE)) {
+    form_set_error('cdn_url', t('Enter a valid absolute CDN URL.'));
+  }
+  if ($values['library_source'] === 'custom' && !valid_url($values['custom_url'], TRUE)) {
+    form_set_error('custom_url', t('Enter a valid absolute custom URL.'));
+  }
+}
+
+/**
+ * Submit handler for charts_chartjs_settings_form().
+ */
+function charts_chartjs_settings_form_submit($form, &$form_state) {
+  config_set('charts_chartjs.settings', 'library_source', $form_state['values']['library_source']);
+  config_set('charts_chartjs.settings', 'cdn_url', $form_state['values']['cdn_url']);
+  config_set('charts_chartjs.settings', 'custom_url', $form_state['values']['custom_url']);
+}
+
+/**
+ * Returns Chart.js provider settings merged with defaults.
+ */
+function charts_chartjs_settings() {
+  $settings = config_get('charts_chartjs.settings');
+  $settings = is_array($settings) ? $settings : array();
+  return $settings + charts_chartjs_default_settings();
+}
+
+/**
+ * Returns default Chart.js provider settings.
+ */
+function charts_chartjs_default_settings() {
+  return array(
+    'library_source' => 'bundled',
+    'cdn_url' => 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
+    'custom_url' => '',
+  );
+}
