@@ -22,6 +22,7 @@
  */
 function charts_settings_form($form, $defaults = array(), $field_options = array(), $parents = array()) {
   // Ensure all defaults are set.
+  $defaults = is_array($defaults) ? $defaults : array();
   $options = array_merge(charts_default_settings(), $defaults);
 
   $form['#attached']['library'][] = array('charts', 'charts.admin');
@@ -482,6 +483,7 @@ function charts_form_input_name($parents) {
  */
 function charts_default_settings_form($form, $form_state) {
   $defaults = config_get('charts.settings', 'charts_default_settings');
+  $defaults = is_array($defaults) ? $defaults : array();
   $defaults += charts_default_settings();
   $field_options = array();
   $parents = array('charts_default_settings');
